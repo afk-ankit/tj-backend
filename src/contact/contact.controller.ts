@@ -8,14 +8,14 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { CompanyGuard } from './guard/company.guard';
 import { ContactService } from './contact.service';
+import { CompanyGuard } from './guard/company.guard';
 
 @UseGuards(CompanyGuard)
 @Controller('contact')
 export class ContactController {
   constructor(private readonly ContactService: ContactService) {}
-  @Post('upload')
+  @Post('upload/:id')
   @UseInterceptors(FileInterceptor('file'))
   uploadFile(@UploadedFile() file: Express.Multer.File) {
     console.log(file);

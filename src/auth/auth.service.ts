@@ -22,33 +22,13 @@ export class AuthService {
 
   private readonly GHL_APP_SSO_KEY = this.configService.get('GHL_APP_SSO_KEY');
 
-  private async getInstalledLocation(
-    access_token: string,
-    companyId: string,
-    planId: string,
-  ): Promise<any> {
-    const appId = this.configService.get('GHL_APP_ID');
-    let url = `${this.GHL_BASE_URL}/oauth/installedLocations?companyId=${companyId}&appId=${appId}&isInstalled=true&limit=10000&scope=contacts.readonly contacts.write`;
-    if (planId) {
-      url += `&planId=${planId}`;
-    }
-
-    const locationsResponse = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        Version: '2021-07-28',
-      },
-    });
-    return locationsResponse;
-  }
-
   async exchangeCodeForToken(code: string, res: Response) {
     try {
       const clientId = this.configService.get('GHL_CLIENT_ID');
       const clientSecret = this.configService.get('GHL_CLIENT_SECRET');
 
       const response = await axios.post(
-        `${this.GHL_BASE_URL}/oauth/token`,
+        `${this.GHL_BASE_URL}/oauth/token?scope=contacts.readonly contacts.write locations/customFields/readonly locations/customFields.write`,
         {
           client_id: clientId,
           client_secret: clientSecret,
@@ -62,7 +42,6 @@ export class AuthService {
           },
         },
       );
-
       const { access_token, refresh_token, expires_in, companyId, locationId } =
         response.data;
       const tokenExpiry = new Date(Date.now() + expires_in * 1000);

@@ -13,6 +13,7 @@ export class CompanyGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request: Request = context.switchToHttp().getRequest();
     const id = request.params.id;
+    if (!id) throw new BadRequestException('No locationid provided');
     const location = await this.prisma.location.findUnique({
       where: { id },
     });
