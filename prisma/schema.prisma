@@ -10,28 +10,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Company {
-  id           String     @id @default(uuid())
-  companyId    String     @unique
-  accessToken  String     @unique
+model Location {
+  id           String    @id
+  companyId    String    @unique
+  accessToken  String    @unique
   refreshToken String
   tokenExpiry  DateTime?
-  locations    Location[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-}
-
-model Location {
-  id           String    @id @default(uuid())
-  name         String
-  locationId   String    @unique
-  accessToken  String?   @unique
-  refreshToken String?
-  tokenExpiry  DateTime?
-  companyId    String
-  company      Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-
-  @@index([companyId])
 }

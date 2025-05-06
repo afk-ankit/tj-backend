@@ -49,8 +49,6 @@ export class AuthController {
         'Decryption failed or invalid data',
       );
     }
-
-    console.log(decryptedData);
     return decryptedData;
   }
 }
