@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -15,10 +16,16 @@ import { CompanyGuard } from './guard/company.guard';
 @Controller('contact')
 export class ContactController {
   constructor(private readonly ContactService: ContactService) {}
+
   @Post('upload/:id')
   @UseInterceptors(FileInterceptor('file'))
-  uploadFile(@UploadedFile() file: Express.Multer.File) {
-    console.log(file);
+  uploadFile(
+    @Param('id') id: string,
+    @UploadedFile()
+    file: Express.Multer.File,
+    @Body() body: { mappings: string },
+  ) {
+    return this.ContactService.handleUpload(file, body, id);
   }
 
   @Get('custom-field/:id')
