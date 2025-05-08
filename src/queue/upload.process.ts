@@ -41,12 +41,13 @@ export class UploadProcessor extends WorkerHost {
 
     const { filePath, mappings, locationId } = job.data;
     const contact_mappings = JSON.parse(mappings);
-    const custom_fields: string[] = [];
 
-    for (const [key, value] of Object.entries(contact_mappings)) {
-      if (value === 'custom') custom_fields.push(key);
-    }
-
+    //INFO: for now can ignore this
+    // const custom_fields: string[] = [];
+    // for (const [key, value] of Object.entries(contact_mappings)) {
+    //   if (value === 'custom') custom_fields.push(key);
+    // }
+    //
     try {
       // Emit initial progress
       this.emitProgress(locationId, 0, 'processing', 'Starting CSV processing');
@@ -55,7 +56,13 @@ export class UploadProcessor extends WorkerHost {
       // Parse CSV file
       this.emitProgress(locationId, 10, 'processing', 'Reading CSV file');
       await this.sleep(500);
-      const results = await this.parseCsvFile(filePath, job, locationId);
+      const results = await this.parseCsvFile(
+        filePath,
+        job,
+        locationId,
+        contact_mappings,
+      );
+      this.logger.debug(results[0]);
 
       this.emitProgress(
         locationId,
@@ -117,6 +124,7 @@ export class UploadProcessor extends WorkerHost {
     filePath: string,
     job: Job<UploadJobData>,
     userId: string,
+    mappings: Record<string, string>,
   ): Promise<any[]> {
     return new Promise((resolve, reject) => {
       const results: any[] = [];
@@ -126,14 +134,19 @@ export class UploadProcessor extends WorkerHost {
       const progressReportThreshold = 10;
 
       stream.on('data', (row) => {
-        results.push(row);
+        // Replace headers using the mappings
+        const mappedRow = Object.fromEntries(
+          Object.entries(row).map(([key, value]) => [
+            mappings[key] ?? key,
+            value,
+          ]),
+        );
+        results.push(mappedRow);
         rowCount++;
 
-        // Report progress every 10 rows or so (adjust threshold for larger files)
+        // Report progress
         if (rowCount % progressReportThreshold === 0) {
           const progressMessage = `Parsed ${rowCount} rows from CSV`;
-          // Calculate progress between 10 and 50 percent based on rows processed
-          // This is approximate since we don't know total rows upfront
           const progressPercentage = Math.min(10 + rowCount / 100, 40);
           this.emitProgress(
             userId,
