@@ -4,6 +4,7 @@ export const DEFAULT_CONTACT_FIELDS = [
   'name',
   'email',
   'phone',
+  'phoneType',
   'address1',
   'city',
   'state',
@@ -18,8 +19,4 @@ export const DEFAULT_CONTACT_FIELDS = [
   'assignedTo',
   'locationId',
   'gender',
-  'home',
-  'work',
-  'landline',
-  'mobile',
 ];
