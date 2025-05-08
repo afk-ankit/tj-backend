@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -15,6 +16,7 @@ export class ContactService {
     private readonly ConfigService: ConfigService,
     private readonly queueService: QueueService,
   ) {}
+  private readonly logger = new Logger(ContactService.name);
 
   async handleUpload(
     file: Express.Multer.File,
