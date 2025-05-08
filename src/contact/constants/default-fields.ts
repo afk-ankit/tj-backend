@@ -18,4 +18,8 @@ export const DEFAULT_CONTACT_FIELDS = [
   'assignedTo',
   'locationId',
   'gender',
+  'home',
+  'work',
+  'landline',
+  'mobile',
 ];
