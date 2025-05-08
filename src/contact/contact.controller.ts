@@ -12,15 +12,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ContactService } from './contact.service';
 import { CompanyGuard } from './guard/company.guard';
 import { diskStorage } from 'multer';
-import { QueueService } from 'src/queue/queue.service';
 
 @UseGuards(CompanyGuard)
 @Controller('contact')
 export class ContactController {
-  constructor(
-    private readonly ContactService: ContactService,
-    private readonly queueService: QueueService,
-  ) {}
+  constructor(private readonly ContactService: ContactService) {}
 
   @Post('upload/:id')
   @UseInterceptors(
@@ -40,12 +36,7 @@ export class ContactController {
     @UploadedFile() file: Express.Multer.File,
     @Body() body: { mappings: string },
   ) {
-    await this.queueService.addUploadJob({
-      filePath: file.path,
-      mappings: body.mappings,
-      locationId: id,
-    });
-    return { message: 'Upload queued successfully.' };
+    return this.ContactService.handleUpload(file, body, id);
   }
 
   @Get('custom-field/:id')

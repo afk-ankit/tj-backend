@@ -5,16 +5,15 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError } from 'axios';
-import * as csvParser from 'csv-parser';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { Readable } from 'stream';
-import { pipeline } from 'stream/promises';
+import { QueueService } from 'src/queue/queue.service';
 
 @Injectable()
 export class ContactService {
   constructor(
     private readonly PrismaService: PrismaService,
     private readonly ConfigService: ConfigService,
+    private readonly queueService: QueueService,
   ) {}
 
   async handleUpload(
@@ -38,25 +37,17 @@ export class ContactService {
         custom_fields.push(key);
       }
     }
-
     const custom_fields_promises = custom_fields.map((item) =>
       this.createCustomField(location.id, item, location.accessToken),
     );
-
     try {
-      const resolved_custom_fields = await Promise.all(custom_fields_promises);
-
-      const results: any[] = [];
-
-      const stream = Readable.from(file.buffer);
-
-      await pipeline(stream, csvParser(), async function* (source) {
-        for await (const row of source) {
-          results.push(row);
-        }
+      await Promise.all(custom_fields_promises);
+      await this.queueService.addUploadJob({
+        filePath: file.path,
+        mappings: body.mappings,
+        locationId: id,
       });
-
-      return resolved_custom_fields;
+      return { message: 'Upload queued successfully.' };
     } catch (error) {
       if (error instanceof AxiosError) {
         switch (error.status) {
