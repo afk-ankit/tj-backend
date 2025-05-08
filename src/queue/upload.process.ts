@@ -50,9 +50,11 @@ export class UploadProcessor extends WorkerHost {
     try {
       // Emit initial progress
       this.emitProgress(locationId, 0, 'processing', 'Starting CSV processing');
+      await this.sleep(500);
 
       // Parse CSV file
       this.emitProgress(locationId, 10, 'processing', 'Reading CSV file');
+      await this.sleep(500);
       const results = await this.parseCsvFile(filePath, job, locationId);
 
       this.emitProgress(
@@ -61,6 +63,7 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         `CSV parsed with ${results.length} records`,
       );
+      await this.sleep(500);
       this.logger.log(`CSV parsed with ${results.length} records`);
 
       // Here you would call GHL APIs and save contacts
@@ -70,7 +73,7 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         'Saving contacts to database',
       );
-
+      await this.sleep(500);
       // Simulate some processing time
       await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -85,6 +88,7 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         'Cleaning up temporary files',
       );
+      await this.sleep(500);
       await fsPromises.unlink(filePath);
 
       const result = { processedCount: results.length };
@@ -213,5 +217,9 @@ export class UploadProcessor extends WorkerHost {
       `Job ${job.id} failed with error: ${error.message}`,
       error.stack,
     );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
