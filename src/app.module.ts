@@ -8,9 +8,10 @@ import { ConfigModule } from './config/config.module';
 import { PrismaService } from './prisma/prisma.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { ContactModule } from './contact/contact.module';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
-  imports: [AuthModule, ConfigModule, PrismaModule, ContactModule],
+  imports: [AuthModule, ConfigModule, PrismaModule, ContactModule, QueueModule],
   controllers: [AppController, AuthController],
   providers: [AppService, AuthService, PrismaService],
 })
