@@ -26,35 +26,90 @@ export class ContactService {
     id: string,
   ) {
     const location = await this.PrismaService.location.findUnique({
-      where: {
-        id,
-      },
+      where: { id },
     });
-
     const contact_mappings = JSON.parse(body.mappings);
-    this.logger.debug(contact_mappings);
-    const custom_fields: string[] = [];
-    this.logger.debug(custom_fields);
+    const custom_fields_set: Set<string> = new Set();
+    const phoneTypeKeys: string[] = [];
 
+    // First pass - identify all custom fields and phone type fields
     for (const [key, value] of Object.entries(contact_mappings)) {
-      if (value == 'custom') {
-        custom_fields.push(key);
+      if (value === 'custom') {
+        if (
+          key.toLowerCase().includes('phone') &&
+          key.toLowerCase().includes('type')
+        ) {
+          // Store phone type keys separately - we'll handle them specially
+          phoneTypeKeys.push(key);
+          // We only need to add Phone Type once to the set
+          custom_fields_set.add('Phone Type');
+        } else {
+          custom_fields_set.add(key);
+        }
       }
     }
-    const custom_fields_promises = custom_fields.map((item) =>
-      this.createCustomField(location.id, item, location.accessToken),
-    );
+
     try {
-      await Promise.all(custom_fields_promises);
+      const custom_fields: string[] = [...custom_fields_set];
+      // Step 1: Create custom fields
+      const createdFields = await Promise.all(
+        custom_fields.map((item) =>
+          this.createCustomField(location.id, item, location.accessToken),
+        ),
+      );
+
+      // Find the phone type field response - correctly access the nested fieldKey
+      let phoneTypeFieldKey = null;
+      for (let i = 0; i < custom_fields.length; i++) {
+        if (custom_fields[i] === 'Phone Type') {
+          phoneTypeFieldKey = createdFields[i].customField.fieldKey;
+          break;
+        }
+      }
+
+      // Make a copy of the original mappings
+      const updatedMappings = { ...contact_mappings };
+
+      // Step 2: Replace 'custom' with actual fieldKey in mappings
+      for (const [key, value] of Object.entries(contact_mappings)) {
+        if (value === 'custom') {
+          if (
+            key.toLowerCase().includes('phone') &&
+            key.toLowerCase().includes('type')
+          ) {
+            // For all phone type fields, use the same fieldKey
+            updatedMappings[key] = phoneTypeFieldKey;
+          } else {
+            // For other custom fields, find the corresponding created field
+            const fieldIndex = custom_fields.findIndex(
+              (field) => field === key,
+            );
+            if (fieldIndex !== -1) {
+              updatedMappings[key] =
+                createdFields[fieldIndex].customField.fieldKey;
+            }
+          }
+        }
+      }
+
+      // Final check to ensure all phone type fields are in the mappings
+      if (phoneTypeFieldKey) {
+        for (const key of phoneTypeKeys) {
+          updatedMappings[key] = phoneTypeFieldKey;
+        }
+      }
+
       await this.queueService.addUploadJob({
         filePath: file.path,
-        mappings: body.mappings,
+        mappings: JSON.stringify(updatedMappings),
         locationId: id,
       });
+
       return { message: 'Upload queued successfully.' };
     } catch (error) {
       if (error instanceof AxiosError) {
-        switch (error.status) {
+        const status = error.response?.status || error.status;
+        switch (status) {
           case 400:
             throw new BadRequestException(error.response?.data.message);
           case 401:
@@ -66,7 +121,6 @@ export class ContactService {
       throw error;
     }
   }
-
   async getCustomField(id: string) {
     const location = await this.PrismaService.location.findUnique({
       where: { id },
