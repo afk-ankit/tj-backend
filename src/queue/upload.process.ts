@@ -1,15 +1,15 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
-import { promises as fsPromises } from 'fs';
-import * as csvParser from 'csv-parser';
-import { createReadStream } from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import axios from 'axios';
+import { Job } from 'bullmq';
+import * as csvParser from 'csv-parser';
+import { createReadStream, promises as fsPromises } from 'fs';
+import pLimit from 'p-limit';
+import { Server } from 'socket.io';
 import { DEFAULT_CONTACT_FIELDS } from 'src/contact/constants/default-fields';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 interface UploadJobData {
   filePath: string;
@@ -55,25 +55,40 @@ export class UploadProcessor extends WorkerHost {
     try {
       // Emit initial progress
       this.emitProgress(locationId, 0, 'processing', 'Starting CSV processing');
-      await this.sleep(500);
 
       // Parse CSV file
       this.emitProgress(locationId, 10, 'processing', 'Reading CSV file');
-      await this.sleep(500);
       const results = await this.parseCsvFile(
         filePath,
         job,
         locationId,
         contact_mappings,
       );
-      this.logger.debug(results[0], results[1]);
+
+      const limit = pLimit(4);
+      const counter = { success: 0, failure: 0 };
+      const contact_map = results.map(
+        (item) => limit(() => this.createGHLContact(item, locationId, counter)),
+        // this.createGHLContact(item, locationId),
+      );
+
+      const settled_results = await Promise.allSettled(contact_map);
+
+      const successCount = settled_results.filter(
+        (r) => r.status === 'fulfilled',
+      ).length;
+      const failCount = settled_results.filter(
+        (r) => r.status === 'rejected',
+      ).length;
+
+      this.logger.debug(`✅ Success: ${successCount}, ❌ Failed: ${failCount}`);
+
       this.emitProgress(
         locationId,
         50,
         'processing',
         `CSV parsed with ${results.length} records`,
       );
-      await this.sleep(500);
       this.logger.log(`CSV parsed with ${results.length} records`);
 
       // Here you would call GHL APIs and save contacts
@@ -83,9 +98,6 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         'Saving contacts to database',
       );
-      await this.sleep(500);
-      // Simulate some processing time
-      await new Promise((resolve) => setTimeout(resolve, 500));
 
       this.logger.log(
         `Processed ${results.length} contacts for location ${locationId}`,
@@ -98,7 +110,6 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         'Cleaning up temporary files',
       );
-      await this.sleep(500);
       await fsPromises.unlink(filePath);
 
       const result = { processedCount: results.length };
@@ -132,10 +143,6 @@ export class UploadProcessor extends WorkerHost {
     return new Promise((resolve, reject) => {
       const results: any[] = [];
       const stream = createReadStream(filePath).pipe(csvParser());
-      this.logger.debug(
-        '_______________THIS IS MAPPINGS______________\n',
-        mappings,
-      );
 
       let rowCount = 0;
       const progressReportThreshold = 10;
@@ -155,7 +162,7 @@ export class UploadProcessor extends WorkerHost {
           const match = originalKey.match(/(\d+)/); // Extract number like '1', '2'
           const index = match ? match[1] : null;
 
-          if (mappedKey === 'phone' || mappedKey === 'phoneType') {
+          if (mappedKey === 'phone' || mappedKey === 'contact.phone_type') {
             if (index) {
               if (!grouped[index]) grouped[index] = {};
               grouped[index][mappedKey] = value as string;
@@ -172,16 +179,25 @@ export class UploadProcessor extends WorkerHost {
           }
         }
 
-        if (customFields.length > 0) {
-          commonFields.customFields = customFields;
-        }
+        // if (customFields.length > 0) {
+        //   commonFields.customFields = customFields;
+        // }
 
         // Create one result per phone group
         for (const group of Object.values(grouped)) {
-          results.push({
-            ...commonFields,
-            ...group,
-          });
+          if (group.phone) {
+            results.push({
+              ...commonFields,
+              phone: group.phone,
+              customFields: [
+                ...customFields,
+                {
+                  key: 'contact.phone_type',
+                  field_value: group['contact.phone_type'],
+                },
+              ],
+            });
+          }
           rowCount++;
         }
 
@@ -276,20 +292,39 @@ export class UploadProcessor extends WorkerHost {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private async createGHLContact(data: Record<string, string>, id: string) {
-    const contact_creation_url =
-      this.ConfigService.get('GHL_BASE_URL') + '/contact';
-    const { accessToken } = await this.PrismaService.location.findUnique({
-      where: {
-        id,
-      },
-    });
-    const result = await axios.post(contact_creation_url, data, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Version: '2021-07-28',
-      },
-    });
-    return result.data;
+  private async createGHLContact(
+    data: Record<string, string>,
+    id: string,
+    counter: { success: number; failure: number },
+  ) {
+    try {
+      const contact_creation_url =
+        this.ConfigService.get('GHL_BASE_URL') + '/contacts/upsert';
+      const { accessToken } = await this.PrismaService.location.findUnique({
+        where: {
+          id,
+        },
+      });
+      const result = await axios.post(
+        contact_creation_url,
+        { ...data, locationId: id },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: '2021-07-28',
+          },
+        },
+      );
+      counter.success++;
+      return result.data;
+    } catch (error) {
+      console.log(error.message);
+      counter.failure++;
+      error();
+    } finally {
+      console.log(
+        `✅ Success: ${counter.success}, ❌ Failed: ${counter.failure}`,
+      );
+    }
   }
 }
