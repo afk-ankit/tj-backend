@@ -1,10 +1,9 @@
-export const DEFAULT_CONTACT_FIELDS = [
+export const DEFAULT_CONTACT_FIELDS = new Set([
   'firstName',
   'lastName',
   'name',
   'email',
   'phone',
-  'phoneType',
   'address1',
   'city',
   'state',
@@ -19,4 +18,4 @@ export const DEFAULT_CONTACT_FIELDS = [
   'assignedTo',
   'locationId',
   'gender',
-];
+]);
