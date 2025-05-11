@@ -62,8 +62,7 @@ export class UploadProcessor extends WorkerHost {
         locationId,
         contact_mappings,
       );
-      this.logger.debug(results[0]);
-
+      this.logger.debug(results.length);
       this.emitProgress(
         locationId,
         50,
@@ -133,16 +132,39 @@ export class UploadProcessor extends WorkerHost {
       let rowCount = 0;
       const progressReportThreshold = 10;
 
+      this.logger.debug(mappings);
+
       stream.on('data', (row) => {
-        // Replace headers using the mappings
-        const mappedRow = Object.fromEntries(
-          Object.entries(row).map(([key, value]) => [
-            mappings[key] ?? key,
-            value,
-          ]),
-        );
-        results.push(mappedRow);
-        rowCount++;
+        // Group fields
+        const grouped: Record<string, Record<string, string>> = {};
+        const commonFields: Record<string, string> = {};
+
+        for (const [originalKey, value] of Object.entries(row)) {
+          const mappedKey = mappings[originalKey] ?? originalKey;
+
+          // Check if it's a phone/phoneType field with a number (e.g., Phone 1, Phone 2)
+          const match = originalKey.match(/(\d+)/); // Extract number like '1', '2'
+          const index = match ? match[1] : null;
+
+          if (mappedKey === 'phone' || mappedKey === 'phoneType') {
+            if (index) {
+              if (!grouped[index]) grouped[index] = {};
+              grouped[index][mappedKey] = value as string;
+            }
+          } else {
+            // These are common fields like firstName, lastName
+            commonFields[mappedKey] = value as string;
+          }
+        }
+
+        // Create one result per phone group
+        for (const group of Object.values(grouped)) {
+          results.push({
+            ...commonFields,
+            ...group,
+          });
+          rowCount++;
+        }
 
         // Report progress
         if (rowCount % progressReportThreshold === 0) {
@@ -159,7 +181,6 @@ export class UploadProcessor extends WorkerHost {
           });
         }
       });
-
       stream.on('error', (error) => {
         reject(error);
       });

@@ -32,7 +32,9 @@ export class ContactService {
     });
 
     const contact_mappings = JSON.parse(body.mappings);
+    this.logger.debug(contact_mappings);
     const custom_fields: string[] = [];
+    this.logger.debug(custom_fields);
 
     for (const [key, value] of Object.entries(contact_mappings)) {
       if (value == 'custom') {
