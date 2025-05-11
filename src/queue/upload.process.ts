@@ -6,6 +6,10 @@ import { createReadStream } from 'fs';
 import { Injectable, Logger } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from 'src/prisma/prisma.service';
+import axios from 'axios';
+import { DEFAULT_CONTACT_FIELDS } from 'src/contact/constants/default-fields';
 
 interface UploadJobData {
   filePath: string;
@@ -29,6 +33,12 @@ interface JobProgress {
 @Injectable()
 @Processor('upload-csv')
 export class UploadProcessor extends WorkerHost {
+  constructor(
+    private readonly ConfigService: ConfigService,
+    private readonly PrismaService: PrismaService,
+  ) {
+    super();
+  }
   private readonly logger = new Logger(UploadProcessor.name);
 
   @WebSocketServer()
@@ -42,12 +52,6 @@ export class UploadProcessor extends WorkerHost {
     const { filePath, mappings, locationId } = job.data;
     const contact_mappings = JSON.parse(mappings);
 
-    //INFO: for now can ignore this
-    // const custom_fields: string[] = [];
-    // for (const [key, value] of Object.entries(contact_mappings)) {
-    //   if (value === 'custom') custom_fields.push(key);
-    // }
-    //
     try {
       // Emit initial progress
       this.emitProgress(locationId, 0, 'processing', 'Starting CSV processing');
@@ -62,7 +66,7 @@ export class UploadProcessor extends WorkerHost {
         locationId,
         contact_mappings,
       );
-      this.logger.debug(results.length);
+      this.logger.debug(results[0], results[1]);
       this.emitProgress(
         locationId,
         50,
@@ -128,16 +132,21 @@ export class UploadProcessor extends WorkerHost {
     return new Promise((resolve, reject) => {
       const results: any[] = [];
       const stream = createReadStream(filePath).pipe(csvParser());
+      this.logger.debug(
+        '_______________THIS IS MAPPINGS______________\n',
+        mappings,
+      );
 
       let rowCount = 0;
       const progressReportThreshold = 10;
 
-      this.logger.debug(mappings);
+      // this.logger.debug(mappings);
 
       stream.on('data', (row) => {
         // Group fields
         const grouped: Record<string, Record<string, string>> = {};
-        const commonFields: Record<string, string> = {};
+        const commonFields: Record<string, any> = {}; // allow customFields array
+        const customFields: { key: string; field_value: string }[] = [];
 
         for (const [originalKey, value] of Object.entries(row)) {
           const mappedKey = mappings[originalKey] ?? originalKey;
@@ -152,9 +161,19 @@ export class UploadProcessor extends WorkerHost {
               grouped[index][mappedKey] = value as string;
             }
           } else {
-            // These are common fields like firstName, lastName
-            commonFields[mappedKey] = value as string;
+            if (DEFAULT_CONTACT_FIELDS.has(mappedKey)) {
+              commonFields[mappedKey] = value as string;
+            } else {
+              customFields.push({
+                key: mappedKey,
+                field_value: value as string,
+              });
+            }
           }
+        }
+
+        if (customFields.length > 0) {
+          commonFields.customFields = customFields;
         }
 
         // Create one result per phone group
@@ -255,5 +274,22 @@ export class UploadProcessor extends WorkerHost {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async createGHLContact(data: Record<string, string>, id: string) {
+    const contact_creation_url =
+      this.ConfigService.get('GHL_BASE_URL') + '/contact';
+    const { accessToken } = await this.PrismaService.location.findUnique({
+      where: {
+        id,
+      },
+    });
+    const result = await axios.post(contact_creation_url, data, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Version: '2021-07-28',
+      },
+    });
+    return result.data;
   }
 }
