@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
@@ -43,6 +43,7 @@ export class UploadProcessor extends WorkerHost {
     super();
   }
   private readonly logger = new Logger(UploadProcessor.name);
+  private readonly limit = pLimit(3);
 
   @WebSocketServer()
   server: Server;
@@ -70,7 +71,6 @@ export class UploadProcessor extends WorkerHost {
         contact_mappings,
       );
 
-      const limit = pLimit(4);
       const counter = { success: 0, failure: 0 };
 
       // Update total records count early to improve UX
@@ -86,7 +86,7 @@ export class UploadProcessor extends WorkerHost {
       );
 
       const contact_map = results.map((item) =>
-        limit(() => this.createGHLContact(item, locationId, counter)),
+        this.limit(() => this.createGHLContact(item, locationId, counter)),
       );
 
       // Start periodic status updates while contacts are being created
@@ -226,7 +226,7 @@ export class UploadProcessor extends WorkerHost {
               commonFields[mappedKey] = value as string;
             } else {
               customFields.push({
-                key: mappedKey,
+                key: mappedKey.replace(/^contact\./, ''),
                 field_value: value as string,
               });
             }
@@ -244,7 +244,7 @@ export class UploadProcessor extends WorkerHost {
                 ...(group['contact.phone_type']
                   ? [
                       {
-                        key: 'contact.phone_type',
+                        key: 'phone_type',
                         field_value: group['contact.phone_type'],
                       },
                     ]
@@ -331,6 +331,7 @@ export class UploadProcessor extends WorkerHost {
   }
 
   // BullMQ event handlers
+  @OnWorkerEvent('active')
   async onActive(job: Job<UploadJobData, any, string>): Promise<void> {
     this.logger.log(`Job ${job.id} started processing`);
     this.emitProgress(
@@ -341,6 +342,7 @@ export class UploadProcessor extends WorkerHost {
     );
   }
 
+  @OnWorkerEvent('completed')
   async onCompleted(
     job: Job<UploadJobData, any, string>,
     result: any,
@@ -350,14 +352,12 @@ export class UploadProcessor extends WorkerHost {
     );
   }
 
+  @OnWorkerEvent('failed')
   async onFailed(
     job: Job<UploadJobData, any, string>,
     error: Error,
   ): Promise<void> {
-    this.logger.error(
-      `Job ${job.id} failed with error: ${error.message}`,
-      error.stack,
-    );
+    this.logger.error(`Job ${job.id} failed with error: ${error.message}`);
   }
 
   private async createGHLContact(
