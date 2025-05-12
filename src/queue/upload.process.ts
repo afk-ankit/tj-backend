@@ -23,6 +23,9 @@ interface JobProgress {
   status: 'processing' | 'completed' | 'failed';
   message?: string;
   result?: any;
+  successCount?: number;
+  failureCount?: number;
+  totalRecords?: number;
 }
 
 @WebSocketGateway({
@@ -44,9 +47,11 @@ export class UploadProcessor extends WorkerHost {
   @WebSocketServer()
   server: Server;
 
-  async process(
-    job: Job<UploadJobData, any, string>,
-  ): Promise<{ processedCount: number }> {
+  async process(job: Job<UploadJobData, any, string>): Promise<{
+    processedCount: number;
+    successCount: number;
+    failureCount: number;
+  }> {
     this.logger.debug(`Processing upload job ${job.id}`);
 
     const { filePath, mappings, locationId } = job.data;
@@ -67,12 +72,47 @@ export class UploadProcessor extends WorkerHost {
 
       const limit = pLimit(4);
       const counter = { success: 0, failure: 0 };
-      const contact_map = results.map(
-        (item) => limit(() => this.createGHLContact(item, locationId, counter)),
-        // this.createGHLContact(item, locationId),
+
+      // Update total records count early to improve UX
+      this.emitProgress(
+        locationId,
+        30,
+        'processing',
+        `Preparing to process ${results.length} contacts`,
+        undefined,
+        0,
+        0,
+        results.length,
       );
 
+      const contact_map = results.map((item) =>
+        limit(() => this.createGHLContact(item, locationId, counter)),
+      );
+
+      // Start periodic status updates while contacts are being created
+      const statusInterval = setInterval(() => {
+        const totalProcessed = counter.success + counter.failure;
+        const percentage = Math.min(
+          30 + Math.round((totalProcessed / results.length) * 50),
+          80,
+        );
+
+        this.emitProgress(
+          locationId,
+          percentage,
+          'processing',
+          `Processing contacts (${totalProcessed}/${results.length})`,
+          undefined,
+          counter.success,
+          counter.failure,
+          results.length,
+        );
+      }, 1000);
+
       const settled_results = await Promise.allSettled(contact_map);
+
+      // Clear interval once all promises are settled
+      clearInterval(statusInterval);
 
       const successCount = settled_results.filter(
         (r) => r.status === 'fulfilled',
@@ -85,20 +125,16 @@ export class UploadProcessor extends WorkerHost {
 
       this.emitProgress(
         locationId,
-        50,
+        85,
         'processing',
-        `CSV parsed with ${results.length} records`,
+        `CSV processed with ${results.length} records`,
+        undefined,
+        counter.success,
+        counter.failure,
+        results.length,
       );
+
       this.logger.log(`CSV parsed with ${results.length} records`);
-
-      // Here you would call GHL APIs and save contacts
-      this.emitProgress(
-        locationId,
-        70,
-        'processing',
-        'Saving contacts to database',
-      );
-
       this.logger.log(
         `Processed ${results.length} contacts for location ${locationId}`,
       );
@@ -106,30 +142,50 @@ export class UploadProcessor extends WorkerHost {
       // Delete file after processing
       this.emitProgress(
         locationId,
-        90,
+        95,
         'processing',
         'Cleaning up temporary files',
+        undefined,
+        counter.success,
+        counter.failure,
+        results.length,
       );
+
       await fsPromises.unlink(filePath);
 
-      const result = { processedCount: results.length };
+      const result = {
+        processedCount: results.length,
+        successCount: counter.success,
+        failureCount: counter.failure,
+        totalRecords: results.length,
+      };
+
       this.emitProgress(
         locationId,
         100,
         'completed',
         'Upload completed successfully',
         result,
+        counter.success,
+        counter.failure,
+        results.length,
       );
 
       return result;
     } catch (error) {
       this.logger.error(`Error processing upload job ${job.id}:`, error);
+
+      // Include any partial success/failure counts in the error message
       this.emitProgress(
         locationId,
         0,
         'failed',
         `Processing failed: ${error.message}`,
+        undefined,
+        0,
+        0,
       );
+
       throw error;
     }
   }
@@ -147,19 +203,17 @@ export class UploadProcessor extends WorkerHost {
       let rowCount = 0;
       const progressReportThreshold = 10;
 
-      // this.logger.debug(mappings);
-
       stream.on('data', (row) => {
         // Group fields
         const grouped: Record<string, Record<string, string>> = {};
-        const commonFields: Record<string, any> = {}; // allow customFields array
+        const commonFields: Record<string, any> = {};
         const customFields: { key: string; field_value: string }[] = [];
 
         for (const [originalKey, value] of Object.entries(row)) {
           const mappedKey = mappings[originalKey] ?? originalKey;
 
-          // Check if it's a phone/phoneType field with a number (e.g., Phone 1, Phone 2)
-          const match = originalKey.match(/(\d+)/); // Extract number like '1', '2'
+          // Check if it's a phone/phoneType field with a number
+          const match = originalKey.match(/(\d+)/);
           const index = match ? match[1] : null;
 
           if (mappedKey === 'phone' || mappedKey === 'contact.phone_type') {
@@ -179,10 +233,6 @@ export class UploadProcessor extends WorkerHost {
           }
         }
 
-        // if (customFields.length > 0) {
-        //   commonFields.customFields = customFields;
-        // }
-
         // Create one result per phone group
         for (const group of Object.values(grouped)) {
           if (group.phone) {
@@ -191,31 +241,42 @@ export class UploadProcessor extends WorkerHost {
               phone: group.phone,
               customFields: [
                 ...customFields,
-                {
-                  key: 'contact.phone_type',
-                  field_value: group['contact.phone_type'],
-                },
+                ...(group['contact.phone_type']
+                  ? [
+                      {
+                        key: 'contact.phone_type',
+                        field_value: group['contact.phone_type'],
+                      },
+                    ]
+                  : []),
               ],
             });
           }
           rowCount++;
         }
 
-        // Report progress
+        // Report progress with more detailed information
         if (rowCount % progressReportThreshold === 0) {
           const progressMessage = `Parsed ${rowCount} rows from CSV`;
-          const progressPercentage = Math.min(10 + rowCount / 100, 40);
+          const progressPercentage = Math.min(10 + rowCount / 100, 30);
+
           this.emitProgress(
             userId,
             progressPercentage,
             'processing',
             progressMessage,
+            undefined,
+            0,
+            0,
+            results.length,
           );
+
           job.updateProgress(progressPercentage).catch((err) => {
             this.logger.warn(`Failed to update job progress: ${err.message}`);
           });
         }
       });
+
       stream.on('error', (error) => {
         reject(error);
       });
@@ -232,12 +293,18 @@ export class UploadProcessor extends WorkerHost {
     status: JobProgress['status'],
     message: string,
     result?: any,
+    successCount?: number,
+    failureCount?: number,
+    totalRecords?: number,
   ): void {
     const progressUpdate: JobProgress = {
       progress,
       status,
       message,
       result,
+      successCount,
+      failureCount,
+      totalRecords,
     };
 
     // Emit to a room specific to this user
@@ -266,7 +333,12 @@ export class UploadProcessor extends WorkerHost {
   // BullMQ event handlers
   async onActive(job: Job<UploadJobData, any, string>): Promise<void> {
     this.logger.log(`Job ${job.id} started processing`);
-    this.emitProgress(job.id, 0, 'processing', 'Job started processing');
+    this.emitProgress(
+      job.data.locationId,
+      0,
+      'processing',
+      'Job started processing',
+    );
   }
 
   async onCompleted(
@@ -274,7 +346,7 @@ export class UploadProcessor extends WorkerHost {
     result: any,
   ): Promise<void> {
     this.logger.log(
-      `Job ${job.id} completed. Processed ${result.processedCount} contacts`,
+      `Job ${job.id} completed. Processed ${result.processedCount} contacts (${result.successCount} success, ${result.failureCount} failed)`,
     );
   }
 
@@ -286,10 +358,6 @@ export class UploadProcessor extends WorkerHost {
       `Job ${job.id} failed with error: ${error.message}`,
       error.stack,
     );
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async createGHLContact(
@@ -318,13 +386,9 @@ export class UploadProcessor extends WorkerHost {
       counter.success++;
       return result.data;
     } catch (error) {
-      console.log(error.message);
+      this.logger.error(`Failed to create contact: ${error.message}`);
       counter.failure++;
-      error();
-    } finally {
-      console.log(
-        `✅ Success: ${counter.success}, ❌ Failed: ${counter.failure}`,
-      );
+      throw error; // Re-throw to ensure it's counted as a failure in Promise.allSettled
     }
   }
 }
