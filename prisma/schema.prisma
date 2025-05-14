@@ -12,7 +12,7 @@ datasource db {
 
 model Location {
   id           String    @id
-  companyId    String    @unique
+  companyId    String    
   accessToken  String    @unique
   refreshToken String
   tokenExpiry  DateTime?
