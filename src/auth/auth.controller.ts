@@ -35,7 +35,7 @@ export class AuthController {
 
   @Post('appInstalled')
   async appInstalled(@Body() body: InstallEvent) {
-    return this.authService.webHookInstall(body);
+    return body;
   }
 
   @Post('decrypt')

@@ -1,4 +1,3 @@
-import * as CryptoJS from 'crypto-js';
 import {
   BadRequestException,
   Injectable,
@@ -7,9 +6,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Location } from '@prisma/client';
 import axios, { AxiosError } from 'axios';
+import * as CryptoJS from 'crypto-js';
 import { Response } from 'express';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { InstallEvent } from 'types/install-event';
 
 @Injectable()
 export class AuthService {
@@ -82,8 +81,8 @@ export class AuthService {
   }
 
   async refreshToken(id: string, scope: 'Agency' | 'Location') {
-    let company: Location | Location;
-    if (scope === 'Agency') {
+    let company: Location;
+    if (scope == 'Agency') {
       throw new BadRequestException('Agency not allowed in this application');
     } else {
       company = await this.prisma.location.findUnique({
@@ -115,24 +114,14 @@ export class AuthService {
     const { access_token, refresh_token, expires_in } = response.data;
     const tokenExpiry = new Date(Date.now() + expires_in * 1000);
 
-    if (scope == 'Agency')
-      await this.prisma.location.update({
-        where: { id: id },
-        data: {
-          accessToken: access_token,
-          refreshToken: refresh_token,
-          tokenExpiry,
-        },
-      });
-    else
-      await this.prisma.location.update({
-        where: { id: id },
-        data: {
-          accessToken: access_token,
-          refreshToken: refresh_token,
-          tokenExpiry,
-        },
-      });
+    await this.prisma.location.update({
+      where: { id: id },
+      data: {
+        accessToken: access_token,
+        refreshToken: refresh_token,
+        tokenExpiry,
+      },
+    });
 
     return { success: 'Token refreshed successfully', data: { access_token } };
   }
@@ -152,15 +141,5 @@ export class AuthService {
 
   async processEncryptedData(encryptedData: string) {
     return this.decryptAndParseData(encryptedData);
-  }
-
-  async webHookInstall(body: InstallEvent) {
-    if (body.installType == 'Location') {
-      await this.prisma.location.findUnique({
-        where: {
-          companyId: body.companyId,
-        },
-      });
-    }
   }
 }
