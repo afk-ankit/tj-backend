@@ -83,11 +83,9 @@ export class AuthService {
 
   async refreshToken(id: string, scope: 'Agency' | 'Location') {
     let company: Location | Location;
-    if (scope === 'Agency')
-      company = await this.prisma.location.findUnique({
-        where: { companyId: id },
-      });
-    else {
+    if (scope === 'Agency') {
+      throw new BadRequestException('Agency not allowed in this application');
+    } else {
       company = await this.prisma.location.findUnique({
         where: { id: id },
       });
