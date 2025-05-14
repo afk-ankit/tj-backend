@@ -99,6 +99,14 @@ export class ContactService {
         }
       }
 
+      //debug logs
+      this.logger.debug(
+        'Created Fields:\n' + JSON.stringify(createdFields, null, 2),
+      );
+      this.logger.debug(
+        'Updated Mappings:\n' + JSON.stringify(updatedMappings, null, 2),
+      );
+
       await this.queueService.addUploadJob({
         filePath: file.path,
         mappings: JSON.stringify(updatedMappings),
