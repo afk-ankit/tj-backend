@@ -10,6 +10,7 @@ import pLimit from 'p-limit';
 import { Server } from 'socket.io';
 import { DEFAULT_CONTACT_FIELDS } from 'src/contact/constants/default-fields';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { JobStatus } from '@prisma/client';
 
 interface UploadJobData {
   filePath: string;
@@ -58,6 +59,13 @@ export class UploadProcessor extends WorkerHost {
     const { filePath, mappings, locationId } = job.data;
     const contact_mappings = JSON.parse(mappings);
 
+    // Create initial DB entry for job
+    await this.createDbJobEntry(
+      Number(job.id),
+      'processing',
+      'Starting CSV processing',
+    );
+
     try {
       // Emit initial progress
       this.emitProgress(locationId, 0, 'processing', 'Starting CSV processing');
@@ -74,12 +82,24 @@ export class UploadProcessor extends WorkerHost {
       const counter = { success: 0, failure: 0 };
 
       // Update total records count early to improve UX
+      const progressMessage = `Preparing to process ${results.length} contacts`;
       this.emitProgress(
         locationId,
         30,
         'processing',
-        `Preparing to process ${results.length} contacts`,
+        progressMessage,
         undefined,
+        0,
+        0,
+        results.length,
+      );
+
+      // Update DB with total records info
+      await this.updateDbJobEntry(
+        Number(job.id),
+        'processing',
+        progressMessage,
+        null,
         0,
         0,
         results.length,
@@ -90,19 +110,32 @@ export class UploadProcessor extends WorkerHost {
       );
 
       // Start periodic status updates while contacts are being created
-      const statusInterval = setInterval(() => {
+      const statusInterval = setInterval(async () => {
         const totalProcessed = counter.success + counter.failure;
         const percentage = Math.min(
           30 + Math.round((totalProcessed / results.length) * 50),
           80,
         );
 
+        const statusMessage = `Processing contacts (${totalProcessed}/${results.length})`;
+
         this.emitProgress(
           locationId,
           percentage,
           'processing',
-          `Processing contacts (${totalProcessed}/${results.length})`,
+          statusMessage,
           undefined,
+          counter.success,
+          counter.failure,
+          results.length,
+        );
+
+        // Update DB with current progress
+        await this.updateDbJobEntry(
+          Number(job.id),
+          'processing',
+          statusMessage,
+          null,
           counter.success,
           counter.failure,
           results.length,
@@ -123,12 +156,23 @@ export class UploadProcessor extends WorkerHost {
 
       this.logger.debug(`✅ Success: ${successCount}, ❌ Failed: ${failCount}`);
 
+      const processingCompleteMessage = `CSV processed with ${results.length} records`;
       this.emitProgress(
         locationId,
         85,
         'processing',
-        `CSV processed with ${results.length} records`,
+        processingCompleteMessage,
         undefined,
+        counter.success,
+        counter.failure,
+        results.length,
+      );
+
+      await this.updateDbJobEntry(
+        Number(job.id),
+        'processing',
+        processingCompleteMessage,
+        null,
         counter.success,
         counter.failure,
         results.length,
@@ -140,12 +184,23 @@ export class UploadProcessor extends WorkerHost {
       );
 
       // Delete file after processing
+      const cleanupMessage = 'Cleaning up temporary files';
       this.emitProgress(
         locationId,
         95,
         'processing',
-        'Cleaning up temporary files',
+        cleanupMessage,
         undefined,
+        counter.success,
+        counter.failure,
+        results.length,
+      );
+
+      await this.updateDbJobEntry(
+        Number(job.id),
+        'processing',
+        cleanupMessage,
+        null,
         counter.success,
         counter.failure,
         results.length,
@@ -160,11 +215,23 @@ export class UploadProcessor extends WorkerHost {
         totalRecords: results.length,
       };
 
+      const completionMessage = 'Upload completed successfully';
       this.emitProgress(
         locationId,
         100,
         'completed',
-        'Upload completed successfully',
+        completionMessage,
+        result,
+        counter.success,
+        counter.failure,
+        results.length,
+      );
+
+      // Update DB with final completion status
+      await this.updateDbJobEntry(
+        Number(job.id),
+        'completed',
+        completionMessage,
         result,
         counter.success,
         counter.failure,
@@ -175,18 +242,94 @@ export class UploadProcessor extends WorkerHost {
     } catch (error) {
       this.logger.error(`Error processing upload job ${job.id}:`, error);
 
+      const errorMessage = `Processing failed: ${error.message}`;
+
       // Include any partial success/failure counts in the error message
-      this.emitProgress(
-        locationId,
-        0,
-        'failed',
-        `Processing failed: ${error.message}`,
-        undefined,
-        0,
-        0,
-      );
+      this.emitProgress(locationId, 0, 'failed', errorMessage, undefined, 0, 0);
+
+      // Update DB with failure status
+      await this.updateDbJobEntry(Number(job.id), 'failed', errorMessage);
 
       throw error;
+    }
+  }
+
+  private async createDbJobEntry(
+    jobId: number,
+    status: JobStatus,
+    message: string = null,
+    result: any = null,
+    successCount: number = null,
+    failureCount: number = null,
+    totalRecords: number = null,
+  ): Promise<void> {
+    try {
+      await this.PrismaService.job.create({
+        data: {
+          jobId,
+          status,
+          message,
+          result: result ? JSON.stringify(result) : null,
+          successCount,
+          failureCount,
+          totalRecords,
+        },
+      });
+      this.logger.debug(`Created new job entry in DB for job ID ${jobId}`);
+    } catch (error) {
+      this.logger.error(`Failed to create job entry in DB: ${error.message}`);
+    }
+  }
+
+  private async updateDbJobEntry(
+    jobId: number,
+    status: JobStatus,
+    message: string = null,
+    result: any = null,
+    successCount: number = null,
+    failureCount: number = null,
+    totalRecords: number = null,
+  ): Promise<void> {
+    try {
+      // Find the existing job entry by jobId
+      const existingJob = await this.PrismaService.job.findFirst({
+        where: { jobId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existingJob) {
+        // Update existing entry
+        await this.PrismaService.job.update({
+          where: { id: existingJob.id },
+          data: {
+            status,
+            message,
+            result: result ? JSON.stringify(result) : existingJob.result,
+            successCount:
+              successCount !== null ? successCount : existingJob.successCount,
+            failureCount:
+              failureCount !== null ? failureCount : existingJob.failureCount,
+            totalRecords:
+              totalRecords !== null ? totalRecords : existingJob.totalRecords,
+          },
+        });
+        this.logger.debug(
+          `Updated job entry in DB for job ID ${jobId} to status ${status}`,
+        );
+      } else {
+        // Create new entry if not found
+        await this.createDbJobEntry(
+          jobId,
+          status,
+          message,
+          result,
+          successCount,
+          failureCount,
+          totalRecords,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Failed to update job entry in DB: ${error.message}`);
     }
   }
 
@@ -271,8 +414,21 @@ export class UploadProcessor extends WorkerHost {
             results.length,
           );
 
+          // Update job progress both in BullMQ and our database
           job.updateProgress(progressPercentage).catch((err) => {
             this.logger.warn(`Failed to update job progress: ${err.message}`);
+          });
+
+          this.updateDbJobEntry(
+            Number(job.id),
+            'processing',
+            progressMessage,
+            null,
+            0,
+            0,
+            results.length,
+          ).catch((err) => {
+            this.logger.warn(`Failed to update job in DB: ${err.message}`);
           });
         }
       });
@@ -340,6 +496,13 @@ export class UploadProcessor extends WorkerHost {
       'processing',
       'Job started processing',
     );
+
+    // Create initial job entry in database when job becomes active
+    await this.createDbJobEntry(
+      Number(job.id),
+      'processing',
+      'Job started processing',
+    );
   }
 
   @OnWorkerEvent('completed')
@@ -347,8 +510,18 @@ export class UploadProcessor extends WorkerHost {
     job: Job<UploadJobData, any, string>,
     result: any,
   ): Promise<void> {
-    this.logger.log(
-      `Job ${job.id} completed. Processed ${result.processedCount} contacts (${result.successCount} success, ${result.failureCount} failed)`,
+    const completionMessage = `Job ${job.id} completed. Processed ${result.processedCount} contacts (${result.successCount} success, ${result.failureCount} failed)`;
+    this.logger.log(completionMessage);
+
+    // Ensure we have a final completed status in the database
+    await this.updateDbJobEntry(
+      Number(job.id),
+      'completed',
+      completionMessage,
+      result,
+      result.successCount,
+      result.failureCount,
+      result.processedCount,
     );
   }
 
@@ -357,7 +530,11 @@ export class UploadProcessor extends WorkerHost {
     job: Job<UploadJobData, any, string>,
     error: Error,
   ): Promise<void> {
-    this.logger.error(`Job ${job.id} failed with error: ${error.message}`);
+    const errorMessage = `Job ${job.id} failed with error: ${error.message}`;
+    this.logger.error(errorMessage);
+
+    // Update job status to failed in the database
+    await this.updateDbJobEntry(Number(job.id), 'failed', errorMessage);
   }
 
   private async createGHLContact(
