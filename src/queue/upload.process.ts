@@ -315,7 +315,7 @@ export class UploadProcessor extends WorkerHost {
         const updateData: any = { status, message };
 
         // Only include these fields if they are provided (not null)
-        if (result !== null) updateData.result = JSON.stringify(result);
+        if (result !== null) updateData.result = result;
         if (successCount !== null) updateData.successCount = successCount;
         if (failureCount !== null) updateData.failureCount = failureCount;
         if (totalRecords !== null) updateData.totalRecords = totalRecords;
