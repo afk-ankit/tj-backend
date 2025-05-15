@@ -141,17 +141,6 @@ export class UploadProcessor extends WorkerHost {
           counter.failure,
           results.length,
         );
-
-        // Update DB with current progress (status message only, no counts)
-        await this.updateDbJobEntry(
-          Number(job.id),
-          'processing',
-          statusMessage,
-          null,
-          null, // Don't update success count during processing
-          null, // Don't update failure count during processing
-          results.length,
-        );
       }, 1000);
 
       const settled_results = await Promise.allSettled(contact_map);
@@ -509,19 +498,6 @@ export class UploadProcessor extends WorkerHost {
       'processing',
       'Job started processing',
     );
-
-    // Check if job entry already exists before creating a new one
-    const existingJob = await this.PrismaService.job.findFirst({
-      where: { jobId: Number(job.id) },
-    });
-
-    if (!existingJob) {
-      await this.createDbJobEntry(
-        Number(job.id),
-        'processing',
-        'Job started processing',
-      );
-    }
   }
 
   @OnWorkerEvent('completed')
