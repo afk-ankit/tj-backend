@@ -44,7 +44,7 @@ export class UploadProcessor extends WorkerHost {
     super();
   }
   private readonly logger = new Logger(UploadProcessor.name);
-  private readonly limit = pLimit(3);
+  private readonly limit = pLimit(1);
 
   @WebSocketServer()
   server: Server;
