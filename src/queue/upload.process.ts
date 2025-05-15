@@ -419,19 +419,6 @@ export class UploadProcessor extends WorkerHost {
           job.updateProgress(progressPercentage).catch((err) => {
             this.logger.warn(`Failed to update job progress: ${err.message}`);
           });
-
-          // Update DB with current parsing progress (message only, no counts)
-          this.updateDbJobEntry(
-            Number(job.id),
-            'processing',
-            progressMessage,
-            null,
-            null, // Don't update success count during parsing
-            null, // Don't update failure count during parsing
-            results.length,
-          ).catch((err) => {
-            this.logger.warn(`Failed to update job in DB: ${err.message}`);
-          });
         }
       });
 
