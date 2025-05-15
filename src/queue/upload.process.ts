@@ -13,6 +13,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { JobStatus } from '@prisma/client';
 
 interface UploadJobData {
+  fileName: string;
   filePath: string;
   mappings: string;
   locationId: string;
@@ -56,7 +57,7 @@ export class UploadProcessor extends WorkerHost {
   }> {
     this.logger.debug(`Processing upload job ${job.id}`);
 
-    const { filePath, mappings, locationId } = job.data;
+    const { fileName, filePath, mappings, locationId } = job.data;
     const contact_mappings = JSON.parse(mappings);
 
     // Check if job entry already exists, if not create initial DB entry for job
@@ -69,6 +70,11 @@ export class UploadProcessor extends WorkerHost {
         Number(job.id),
         'processing',
         'Starting CSV processing',
+        null,
+        null,
+        null,
+        null,
+        fileName,
       );
     } else {
       await this.updateDbJobEntry(
@@ -264,6 +270,7 @@ export class UploadProcessor extends WorkerHost {
     successCount: number = null,
     failureCount: number = null,
     totalRecords: number = null,
+    fileName: string = null,
   ): Promise<void> {
     try {
       await this.PrismaService.job.create({
@@ -275,6 +282,7 @@ export class UploadProcessor extends WorkerHost {
           successCount,
           failureCount,
           totalRecords,
+          fileName,
         },
       });
       this.logger.debug(`Created new job entry in DB for job ID ${jobId}`);
@@ -291,6 +299,7 @@ export class UploadProcessor extends WorkerHost {
     successCount: number = null,
     failureCount: number = null,
     totalRecords: number = null,
+    fileName: string = null,
   ): Promise<void> {
     try {
       // Find the existing job entry by jobId
@@ -308,6 +317,7 @@ export class UploadProcessor extends WorkerHost {
         if (successCount !== null) updateData.successCount = successCount;
         if (failureCount !== null) updateData.failureCount = failureCount;
         if (totalRecords !== null) updateData.totalRecords = totalRecords;
+        if (fileName !== null) updateData.fileName = fileName;
 
         // Update existing entry
         await this.PrismaService.job.update({
@@ -327,6 +337,7 @@ export class UploadProcessor extends WorkerHost {
           successCount,
           failureCount,
           totalRecords,
+          fileName,
         );
       }
     } catch (error) {

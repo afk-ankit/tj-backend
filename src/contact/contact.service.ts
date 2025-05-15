@@ -108,6 +108,7 @@ export class ContactService {
       );
 
       await this.queueService.addUploadJob({
+        fileName: file.filename,
         filePath: file.path,
         mappings: JSON.stringify(updatedMappings),
         locationId: id,

@@ -7,6 +7,7 @@ export class QueueService {
   constructor(@InjectQueue('upload-csv') private queue: Queue) {}
 
   async addUploadJob(data: {
+    fileName: string;
     filePath: string;
     mappings: string;
     locationId: string;
