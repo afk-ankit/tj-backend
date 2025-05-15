@@ -67,22 +67,20 @@ export class UploadProcessor extends WorkerHost {
     });
 
     if (!existingJob) {
-      await this.createDbJobEntry(
-        Number(job.id),
-        'processing',
-        'Starting CSV processing',
-        null,
-        null,
-        null,
-        null,
+      await this.createDbJobEntry({
+        locationId: locationId,
+        jobId: Number(job.id),
+        status: 'processing',
+        message: 'Starting CSV processing',
         fileName,
-      );
+      });
     } else {
-      await this.updateDbJobEntry(
-        Number(job.id),
-        'processing',
-        'Resuming CSV processing',
-      );
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'processing',
+        message: 'Starting CSV processing',
+        fileName,
+      });
     }
 
     try {
@@ -115,15 +113,12 @@ export class UploadProcessor extends WorkerHost {
       );
 
       // Update DB with total records info (no success/failure counts yet)
-      await this.updateDbJobEntry(
-        Number(job.id),
-        'processing',
-        progressMessage,
-        null,
-        null,
-        null,
-        results.length,
-      );
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'processing',
+        message: progressMessage,
+        totalRecords: results.length,
+      });
 
       const contact_map = results.map((item) =>
         this.limit(() => this.createGHLContact(item, locationId, counter)),
@@ -178,15 +173,12 @@ export class UploadProcessor extends WorkerHost {
       );
 
       // Still no success/failure counts in DB until completion
-      await this.updateDbJobEntry(
-        Number(job.id),
-        'processing',
-        processingCompleteMessage,
-        null,
-        null,
-        null,
-        results.length,
-      );
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'processing',
+        message: processingCompleteMessage,
+        totalRecords: results.length,
+      });
 
       this.logger.log(`CSV parsed with ${results.length} records`);
       this.logger.log(
@@ -206,15 +198,12 @@ export class UploadProcessor extends WorkerHost {
         results.length,
       );
 
-      await this.updateDbJobEntry(
-        Number(job.id),
-        'processing',
-        cleanupMessage,
-        null,
-        null,
-        null,
-        results.length,
-      );
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'processing',
+        message: cleanupMessage,
+        totalRecords: results.length,
+      });
 
       await fsPromises.unlink(filePath);
 
@@ -238,15 +227,15 @@ export class UploadProcessor extends WorkerHost {
       );
 
       // NOW update DB with success/failure counts at completion
-      await this.updateDbJobEntry(
-        Number(job.id),
-        'completed',
-        completionMessage,
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'completed',
+        message: completionMessage,
         result,
-        counter.success,
-        counter.failure,
-        results.length,
-      );
+        successCount: counter.success,
+        failureCount: counter.failure,
+        totalRecords: results.length,
+      });
 
       return result;
     } catch (error) {
@@ -258,25 +247,41 @@ export class UploadProcessor extends WorkerHost {
       this.emitProgress(locationId, 0, 'failed', errorMessage, undefined, 0, 0);
 
       // Update DB with failure status
-      await this.updateDbJobEntry(Number(job.id), 'failed', errorMessage);
+      await this.updateDbJobEntry({
+        jobId: Number(job.id),
+        status: 'failed',
+        message: errorMessage,
+      });
 
       throw error;
     }
   }
 
-  private async createDbJobEntry(
-    jobId: number,
-    status: JobStatus,
-    message: string = null,
-    result: any = null,
-    successCount: number = null,
-    failureCount: number = null,
-    totalRecords: number = null,
-    fileName: string = null,
-  ): Promise<void> {
+  private async createDbJobEntry({
+    locationId,
+    jobId,
+    status,
+    message = null,
+    result = null,
+    successCount = null,
+    failureCount = null,
+    totalRecords = null,
+    fileName = null,
+  }: {
+    locationId: string;
+    jobId: number;
+    status: JobStatus;
+    message?: string;
+    result?: any;
+    successCount?: number;
+    failureCount?: number;
+    totalRecords?: number;
+    fileName?: string;
+  }): Promise<void> {
     try {
       await this.PrismaService.job.create({
         data: {
+          locationId,
           jobId,
           status,
           message,
@@ -293,16 +298,27 @@ export class UploadProcessor extends WorkerHost {
     }
   }
 
-  private async updateDbJobEntry(
-    jobId: number,
-    status: JobStatus,
-    message: string = null,
-    result: any = null,
-    successCount: number = null,
-    failureCount: number = null,
-    totalRecords: number = null,
-    fileName: string = null,
-  ): Promise<void> {
+  private async updateDbJobEntry({
+    jobId,
+    status,
+    message,
+    locationId = null,
+    result = null,
+    successCount = null,
+    failureCount = null,
+    totalRecords = null,
+    fileName = null,
+  }: {
+    jobId: number;
+    status: JobStatus;
+    message: string;
+    result?: any;
+    successCount?: number;
+    failureCount?: number;
+    totalRecords?: number;
+    fileName?: string;
+    locationId?: string;
+  }): Promise<void> {
     try {
       // Find the existing job entry by jobId
       const existingJob = await this.PrismaService.job.findFirst({
@@ -320,6 +336,7 @@ export class UploadProcessor extends WorkerHost {
         if (failureCount !== null) updateData.failureCount = failureCount;
         if (totalRecords !== null) updateData.totalRecords = totalRecords;
         if (fileName !== null) updateData.fileName = fileName;
+        if (locationId !== null) updateData.locationId = locationId;
 
         // Update existing entry
         await this.PrismaService.job.update({
@@ -331,7 +348,8 @@ export class UploadProcessor extends WorkerHost {
         );
       } else {
         // Create new entry if not found
-        await this.createDbJobEntry(
+        await this.createDbJobEntry({
+          locationId,
           jobId,
           status,
           message,
@@ -340,7 +358,7 @@ export class UploadProcessor extends WorkerHost {
           failureCount,
           totalRecords,
           fileName,
-        );
+        });
       }
     } catch (error) {
       this.logger.error(`Failed to update job entry in DB: ${error.message}`);
@@ -507,19 +525,19 @@ export class UploadProcessor extends WorkerHost {
     job: Job<UploadJobData, any, string>,
     result: any,
   ): Promise<void> {
-    const completionMessage = `Job ${job.id} completed. Processed ${result.processedCount} contacts (${result.successCount} success, ${result.failureCount} failed)`;
+    const completionMessage = `Job ${job.id} completed. Processed ${result.processedCount} contacts.`;
     this.logger.log(completionMessage);
 
     // Update with final completed status and result with counts
-    await this.updateDbJobEntry(
-      Number(job.id),
-      'completed',
-      completionMessage,
+    await this.updateDbJobEntry({
+      jobId: Number(job.id),
+      status: 'completed',
+      message: completionMessage,
       result,
-      result.successCount,
-      result.failureCount,
-      result.processedCount,
-    );
+      successCount: result.successCount,
+      failureCount: result.failureCount,
+      totalRecords: result.processedCount,
+    });
   }
 
   @OnWorkerEvent('failed')
@@ -531,7 +549,11 @@ export class UploadProcessor extends WorkerHost {
     this.logger.error(errorMessage);
 
     // Update job status to failed in the database
-    await this.updateDbJobEntry(Number(job.id), 'failed', errorMessage);
+    await this.updateDbJobEntry({
+      jobId: Number(job.id),
+      status: 'failed',
+      message: errorMessage,
+    });
   }
 
   private async createGHLContact(

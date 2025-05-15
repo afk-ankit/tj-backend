@@ -114,14 +114,6 @@ export class ContactService {
         }
       }
 
-      //debug logs
-      this.logger.debug(
-        'Created Fields:\n' + JSON.stringify(createdFields, null, 2),
-      );
-      this.logger.debug(
-        'Updated Mappings:\n' + JSON.stringify(updatedMappings, null, 2),
-      );
-
       await this.queueService.addUploadJob({
         fileName: file.filename,
         filePath: file.path,
@@ -242,5 +234,17 @@ export class ContactService {
       },
     );
     return res.data;
+  }
+  async getJob(id: string) {
+    const res = await this.PrismaService.job.findMany({
+      where: {
+        locationId: id,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 5,
+    });
+    return res;
   }
 }
