@@ -59,12 +59,24 @@ export class UploadProcessor extends WorkerHost {
     const { filePath, mappings, locationId } = job.data;
     const contact_mappings = JSON.parse(mappings);
 
-    // Create initial DB entry for job
-    await this.createDbJobEntry(
-      Number(job.id),
-      'processing',
-      'Starting CSV processing',
-    );
+    // Check if job entry already exists, if not create initial DB entry for job
+    const existingJob = await this.PrismaService.job.findFirst({
+      where: { jobId: Number(job.id) },
+    });
+
+    if (!existingJob) {
+      await this.createDbJobEntry(
+        Number(job.id),
+        'processing',
+        'Starting CSV processing',
+      );
+    } else {
+      await this.updateDbJobEntry(
+        Number(job.id),
+        'processing',
+        'Resuming CSV processing',
+      );
+    }
 
     try {
       // Emit initial progress
@@ -94,14 +106,14 @@ export class UploadProcessor extends WorkerHost {
         results.length,
       );
 
-      // Update DB with total records info
+      // Update DB with total records info (no success/failure counts yet)
       await this.updateDbJobEntry(
         Number(job.id),
         'processing',
         progressMessage,
         null,
-        0,
-        0,
+        null,
+        null,
         results.length,
       );
 
@@ -130,14 +142,14 @@ export class UploadProcessor extends WorkerHost {
           results.length,
         );
 
-        // Update DB with current progress
+        // Update DB with current progress (status message only, no counts)
         await this.updateDbJobEntry(
           Number(job.id),
           'processing',
           statusMessage,
           null,
-          counter.success,
-          counter.failure,
+          null, // Don't update success count during processing
+          null, // Don't update failure count during processing
           results.length,
         );
       }, 1000);
@@ -168,13 +180,14 @@ export class UploadProcessor extends WorkerHost {
         results.length,
       );
 
+      // Still no success/failure counts in DB until completion
       await this.updateDbJobEntry(
         Number(job.id),
         'processing',
         processingCompleteMessage,
         null,
-        counter.success,
-        counter.failure,
+        null,
+        null,
         results.length,
       );
 
@@ -201,8 +214,8 @@ export class UploadProcessor extends WorkerHost {
         'processing',
         cleanupMessage,
         null,
-        counter.success,
-        counter.failure,
+        null,
+        null,
         results.length,
       );
 
@@ -227,7 +240,7 @@ export class UploadProcessor extends WorkerHost {
         results.length,
       );
 
-      // Update DB with final completion status
+      // NOW update DB with success/failure counts at completion
       await this.updateDbJobEntry(
         Number(job.id),
         'completed',
@@ -298,20 +311,19 @@ export class UploadProcessor extends WorkerHost {
       });
 
       if (existingJob) {
+        // Prepare update data - only include fields that should be updated
+        const updateData: any = { status, message };
+
+        // Only include these fields if they are provided (not null)
+        if (result !== null) updateData.result = JSON.stringify(result);
+        if (successCount !== null) updateData.successCount = successCount;
+        if (failureCount !== null) updateData.failureCount = failureCount;
+        if (totalRecords !== null) updateData.totalRecords = totalRecords;
+
         // Update existing entry
         await this.PrismaService.job.update({
           where: { id: existingJob.id },
-          data: {
-            status,
-            message,
-            result: result ? JSON.stringify(result) : existingJob.result,
-            successCount:
-              successCount !== null ? successCount : existingJob.successCount,
-            failureCount:
-              failureCount !== null ? failureCount : existingJob.failureCount,
-            totalRecords:
-              totalRecords !== null ? totalRecords : existingJob.totalRecords,
-          },
+          data: updateData,
         });
         this.logger.debug(
           `Updated job entry in DB for job ID ${jobId} to status ${status}`,
@@ -414,18 +426,19 @@ export class UploadProcessor extends WorkerHost {
             results.length,
           );
 
-          // Update job progress both in BullMQ and our database
+          // Update job progress in BullMQ
           job.updateProgress(progressPercentage).catch((err) => {
             this.logger.warn(`Failed to update job progress: ${err.message}`);
           });
 
+          // Update DB with current parsing progress (message only, no counts)
           this.updateDbJobEntry(
             Number(job.id),
             'processing',
             progressMessage,
             null,
-            0,
-            0,
+            null, // Don't update success count during parsing
+            null, // Don't update failure count during parsing
             results.length,
           ).catch((err) => {
             this.logger.warn(`Failed to update job in DB: ${err.message}`);
@@ -497,12 +510,18 @@ export class UploadProcessor extends WorkerHost {
       'Job started processing',
     );
 
-    // Create initial job entry in database when job becomes active
-    await this.createDbJobEntry(
-      Number(job.id),
-      'processing',
-      'Job started processing',
-    );
+    // Check if job entry already exists before creating a new one
+    const existingJob = await this.PrismaService.job.findFirst({
+      where: { jobId: Number(job.id) },
+    });
+
+    if (!existingJob) {
+      await this.createDbJobEntry(
+        Number(job.id),
+        'processing',
+        'Job started processing',
+      );
+    }
   }
 
   @OnWorkerEvent('completed')
@@ -513,7 +532,7 @@ export class UploadProcessor extends WorkerHost {
     const completionMessage = `Job ${job.id} completed. Processed ${result.processedCount} contacts (${result.successCount} success, ${result.failureCount} failed)`;
     this.logger.log(completionMessage);
 
-    // Ensure we have a final completed status in the database
+    // Update with final completed status and result with counts
     await this.updateDbJobEntry(
       Number(job.id),
       'completed',
