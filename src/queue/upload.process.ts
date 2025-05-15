@@ -100,7 +100,7 @@ export class UploadProcessor extends WorkerHost {
       const counter = { success: 0, failure: 0 };
 
       // Update total records count early to improve UX
-      const progressMessage = `Preparing to process ${results.length} contacts`;
+      const progressMessage = `Started processing of ${results.length} contacts`;
       this.emitProgress(
         locationId,
         30,
