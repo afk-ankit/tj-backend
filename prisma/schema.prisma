@@ -23,6 +23,7 @@ model Location {
 model Job {
   id           Int       @id @default(autoincrement())
   jobId        Int
+  fileName     String?
   status       JobStatus
   message      String?
   result       Json?
