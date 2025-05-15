@@ -43,8 +43,11 @@ export class ContactController {
   getCustomField(@Param('id') id: string) {
     return this.ContactService.getCustomField(id);
   }
-  @Get('/get-tag/:id')
   getTag(@Param('id') id: string) {
     return this.ContactService.getTag(id);
+  }
+  @Get('/job/:id')
+  getJob(@Param('id') id: string) {
+    return this.ContactService.getJob(id);
   }
 }
