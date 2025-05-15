@@ -18,6 +18,7 @@ interface UploadJobData {
   mappings: string;
   locationId: string;
   userId: string; // Added to identify which user should receive the progress updates
+  tags: string[];
 }
 
 interface JobProgress {
@@ -57,7 +58,7 @@ export class UploadProcessor extends WorkerHost {
   }> {
     this.logger.debug(`Processing upload job ${job.id}`);
 
-    const { fileName, filePath, mappings, locationId } = job.data;
+    const { fileName, filePath, mappings, locationId, tags } = job.data;
     const contact_mappings = JSON.parse(mappings);
 
     // Check if job entry already exists, if not create initial DB entry for job
@@ -95,6 +96,7 @@ export class UploadProcessor extends WorkerHost {
         job,
         locationId,
         contact_mappings,
+        tags,
       );
 
       const counter = { success: 0, failure: 0 };
@@ -350,6 +352,7 @@ export class UploadProcessor extends WorkerHost {
     job: Job<UploadJobData>,
     userId: string,
     mappings: Record<string, string>,
+    tags: string[],
   ): Promise<any[]> {
     return new Promise((resolve, reject) => {
       const results: any[] = [];
@@ -394,6 +397,7 @@ export class UploadProcessor extends WorkerHost {
             results.push({
               ...commonFields,
               phone: group.phone,
+              tags,
               customFields: [
                 ...customFields,
                 ...(group['contact.phone_type']

@@ -11,6 +11,7 @@ export class QueueService {
     filePath: string;
     mappings: string;
     locationId: string;
+    tags: string[];
   }) {
     await this.queue.add('upload-job', data, {
       removeOnComplete: true,

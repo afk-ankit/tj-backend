@@ -34,7 +34,7 @@ export class ContactController {
   async uploadFile(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { mappings: string },
+    @Body() body: { mappings: string; tags: string },
   ) {
     return this.ContactService.handleUpload(file, body, id);
   }
@@ -42,5 +42,9 @@ export class ContactController {
   @Get('custom-field/:id')
   getCustomField(@Param('id') id: string) {
     return this.ContactService.getCustomField(id);
+  }
+  @Get('/get-tag/:id')
+  getTag(@Param('id') id: string) {
+    return this.ContactService.getTag(id);
   }
 }

@@ -22,6 +22,7 @@ export class ContactService {
     file: Express.Multer.File,
     body: {
       mappings: string;
+      tags: string;
     },
     id: string,
   ) {
@@ -29,10 +30,13 @@ export class ContactService {
       where: { id },
     });
     const contact_mappings = JSON.parse(body.mappings);
+    const tags = JSON.parse(body.tags);
+    const custom_tags = tags.filter((tag: { id: string }) =>
+      tag.id.startsWith('custom'),
+    );
     const custom_fields_set: Set<string> = new Set();
     const phoneTypeKeys: string[] = [];
 
-    // First pass - identify all custom fields and phone type fields
     for (const [key, value] of Object.entries(contact_mappings)) {
       if (value === 'custom') {
         if (
@@ -52,12 +56,23 @@ export class ContactService {
     try {
       const custom_fields: string[] = [...custom_fields_set];
       // Step 1: Create custom fields
+      this.logger.log('🔧 Starting custom fields creation...');
       const createdFields = await Promise.all(
         custom_fields.map((item) =>
           this.createCustomField(location.id, item, location.accessToken),
         ),
       );
+      this.logger.log(
+        `✅ ${createdFields.length} custom fields created successfully.`,
+      );
 
+      this.logger.log('🏷️ Starting tag creation...');
+      const createdTags = await Promise.all(
+        custom_tags.map((item: { name: string }) =>
+          this.createTag(location.id, item.name, location.accessToken),
+        ),
+      );
+      this.logger.log(`✅ ${createdTags.length} tags created successfully.`);
       // Find the phone type field response - correctly access the nested fieldKey
       let phoneTypeFieldKey = null;
       for (let i = 0; i < custom_fields.length; i++) {
@@ -112,6 +127,7 @@ export class ContactService {
         filePath: file.path,
         mappings: JSON.stringify(updatedMappings),
         locationId: id,
+        tags: tags.map((item: { name: string }) => item.name),
       });
 
       return { message: 'Upload queued successfully.' };
@@ -168,6 +184,55 @@ export class ContactService {
       {
         name,
         dataType: 'TEXT',
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: '2021-07-28',
+        },
+      },
+    );
+    return res.data;
+  }
+
+  async getTag(id: string) {
+    try {
+      const url = `${this.ConfigService.get('GHL_BASE_URL')}/locations/${id}/tags`;
+      const { accessToken } = await this.PrismaService.location.findUnique({
+        where: {
+          id,
+        },
+      });
+      const res = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: '2021-07-28',
+        },
+      });
+      return res.data;
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        const status = error.response?.status || error.status;
+        switch (status) {
+          case 400:
+            this.logger.error(error.response?.data.message);
+            throw new BadRequestException(error.response?.data.message);
+          case 401:
+            this.logger.error(error.response?.data.message);
+            throw new UnauthorizedException(error.response?.data.message);
+          default:
+            throw error;
+        }
+      }
+      throw error;
+    }
+  }
+  async createTag(id: string, name: string, accessToken: string) {
+    const url = `${this.ConfigService.get('GHL_BASE_URL')}/locations/${id}/tags`;
+    const res = await axios.post(
+      url,
+      {
+        name,
       },
       {
         headers: {
