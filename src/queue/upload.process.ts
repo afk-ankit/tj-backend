@@ -388,6 +388,16 @@ export class UploadProcessor extends WorkerHost {
         for (const [originalKey, value] of Object.entries(row)) {
           const mappedKey = mappings[originalKey] ?? originalKey;
 
+          let parsedValue = value;
+
+          //DND
+          if (!['firstName', 'lastName'].includes(originalKey)) {
+            if (String(value).toLowerCase() === 'true') {
+              parsedValue = true;
+            } else if (String(value).toLowerCase() === 'false') {
+              parsedValue = false;
+            }
+          }
           // Check if it's a phone/phoneType field with a number
           const match = originalKey.match(/(\d+)/);
           const index = match ? match[1] : null;
@@ -395,15 +405,15 @@ export class UploadProcessor extends WorkerHost {
           if (mappedKey === 'phone' || mappedKey === 'contact.phone_type') {
             if (index) {
               if (!grouped[index]) grouped[index] = {};
-              grouped[index][mappedKey] = value as string;
+              grouped[index][mappedKey] = parsedValue as string;
             }
           } else {
             if (DEFAULT_CONTACT_FIELDS.has(mappedKey)) {
-              commonFields[mappedKey] = value as string;
+              commonFields[mappedKey] = parsedValue as string;
             } else {
               customFields.push({
                 key: mappedKey.replace(/^contact\./, ''),
-                field_value: value as string,
+                field_value: parsedValue as string,
               });
             }
           }
