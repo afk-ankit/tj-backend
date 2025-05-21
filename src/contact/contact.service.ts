@@ -1,13 +1,16 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError } from 'axios';
+import { AuthService } from 'src/auth/auth.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { QueueService } from 'src/queue/queue.service';
+import { GHLWorkflowData } from './types/ghl-workflow.type';
 
 @Injectable()
 export class ContactService {
@@ -15,6 +18,7 @@ export class ContactService {
     private readonly PrismaService: PrismaService,
     private readonly ConfigService: ConfigService,
     private readonly queueService: QueueService,
+    private readonly authService: AuthService,
   ) {}
   private readonly logger = new Logger(ContactService.name);
 
@@ -246,5 +250,129 @@ export class ContactService {
       take: 5,
     });
     return res;
+  }
+
+  async workflow(body: GHLWorkflowData, action: 'DND' | 'DELETE') {
+    await this.authService.refreshToken(body.location.id, 'Location');
+    const { accessToken } = await this.PrismaService.location.findUnique({
+      where: {
+        id: body.location.id,
+      },
+    });
+    const url = `${this.ConfigService.get('GHL_BASE_URL')}/contacts/search`;
+    try {
+      const res = await axios.post(
+        url,
+        {
+          locationId: body.location.id,
+          page: 1,
+          pageLimit: 20,
+          filters: [
+            {
+              field: 'firstNameLowerCase',
+              operator: 'eq',
+              value: body.first_name.toLowerCase(),
+            },
+          ],
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: '2021-07-28',
+          },
+        },
+      );
+      const { contacts } = res.data as { contacts: [{ id: string }] };
+      const counter = { success: 0, failure: 0 };
+      const promiseMap = contacts.map((item) =>
+        action == 'DND'
+          ? this.updateGHLContactDND({
+              accessToken,
+              contactId: item.id,
+              counter,
+              exception: body.contact_id,
+            })
+          : this.deleteGHLContactDND({
+              accessToken,
+              contactId: item.id,
+              counter,
+              exception: body.contact_id,
+            }),
+      );
+      await Promise.allSettled(promiseMap);
+      return counter;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        this.logger.error(error.response.data);
+        throw new HttpException(error.response.data, error.response.status);
+      }
+      throw error;
+    }
+  }
+
+  private async updateGHLContactDND({
+    contactId,
+    counter,
+    accessToken,
+    exception,
+  }: {
+    contactId: string;
+    counter: { success: number; failure: number };
+    accessToken: string;
+    exception: string;
+  }) {
+    if (exception == contactId) return;
+    try {
+      const contact_update_url =
+        this.ConfigService.get('GHL_BASE_URL') + `/contacts/${contactId}`;
+      const result = await axios.put(
+        contact_update_url,
+        {
+          dnd: true,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: '2021-07-28',
+          },
+        },
+      );
+      counter.success++;
+      return result.data;
+    } catch (error) {
+      this.logger.error(`Failed to create contact: ${error.message}`);
+      counter.failure++;
+      throw error;
+    }
+  }
+
+  private async deleteGHLContactDND({
+    contactId,
+    counter,
+    accessToken,
+    exception,
+  }: {
+    contactId: string;
+    counter: { success: number; failure: number };
+    accessToken: string;
+    exception: string;
+  }) {
+    if (exception == contactId) return;
+    try {
+      const contact_delete_url =
+        this.ConfigService.get('GHL_BASE_URL') + `/contacts/${contactId}`;
+      const result = await axios.delete(contact_delete_url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: '2021-07-28',
+        },
+      });
+      counter.success++;
+      return result.data;
+    } catch (error) {
+      this.logger.error(`Failed to create contact: ${error.message}`);
+      counter.failure++;
+      throw error;
+    }
   }
 }

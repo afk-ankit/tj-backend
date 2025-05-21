@@ -13,6 +13,12 @@ export class CompanyGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request: Request = context.switchToHttp().getRequest();
+    if (
+      request.method === 'POST' &&
+      request.path.startsWith('/contact/verify')
+    ) {
+      return true;
+    }
     const id = request.params.id;
 
     if (!id) {

@@ -12,6 +12,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ContactService } from './contact.service';
 import { CompanyGuard } from './guard/company.guard';
 import { diskStorage } from 'multer';
+import { GHLWorkflowData } from './types/ghl-workflow.type';
 
 @UseGuards(CompanyGuard)
 @Controller('contact')
@@ -50,5 +51,14 @@ export class ContactController {
   @Get('/job/:id')
   getJob(@Param('id') id: string) {
     return this.ContactService.getJob(id);
+  }
+  @Post('/verify/dnd')
+  worflowDnd(@Body() body: GHLWorkflowData) {
+    return this.ContactService.workflow(body, 'DND');
+  }
+
+  @Post('/verify/delete')
+  workflowDelete(@Body() body: GHLWorkflowData) {
+    return this.ContactService.workflow(body, 'DELETE');
   }
 }
