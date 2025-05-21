@@ -11,6 +11,7 @@ import { AuthService } from 'src/auth/auth.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { QueueService } from 'src/queue/queue.service';
 import { GHLWorkflowData } from './types/ghl-workflow.type';
+import pLimit from 'p-limit';
 
 @Injectable()
 export class ContactService {
@@ -21,6 +22,7 @@ export class ContactService {
     private readonly authService: AuthService,
   ) {}
   private readonly logger = new Logger(ContactService.name);
+  private readonly limit = pLimit(5);
 
   async handleUpload(
     file: Express.Multer.File,
@@ -285,19 +287,21 @@ export class ContactService {
       const { contacts } = res.data as { contacts: [{ id: string }] };
       const counter = { success: 0, failure: 0 };
       const promiseMap = contacts.map((item) =>
-        action == 'DND'
-          ? this.updateGHLContactDND({
-              accessToken,
-              contactId: item.id,
-              counter,
-              exception: body.contact_id,
-            })
-          : this.deleteGHLContactDND({
-              accessToken,
-              contactId: item.id,
-              counter,
-              exception: body.contact_id,
-            }),
+        this.limit(() =>
+          action == 'DND'
+            ? this.updateGHLContactDND({
+                accessToken,
+                contactId: item.id,
+                counter,
+                exception: body.contact_id,
+              })
+            : this.deleteGHLContactDND({
+                accessToken,
+                contactId: item.id,
+                counter,
+                exception: body.contact_id,
+              }),
+        ),
       );
       await Promise.allSettled(promiseMap);
       return counter;
