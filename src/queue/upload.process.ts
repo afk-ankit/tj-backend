@@ -425,6 +425,7 @@ export class UploadProcessor extends WorkerHost {
             results.push({
               data: {
                 ...commonFields,
+                companyName: commonFields.address1,
                 phone: group.phone,
                 customFields: [
                   ...customFields,
