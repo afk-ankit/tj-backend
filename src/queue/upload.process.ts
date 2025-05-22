@@ -423,20 +423,22 @@ export class UploadProcessor extends WorkerHost {
         for (const group of Object.values(grouped)) {
           if (group.phone) {
             results.push({
-              ...commonFields,
-              phone: group.phone,
+              data: {
+                ...commonFields,
+                phone: group.phone,
+                customFields: [
+                  ...customFields,
+                  ...(group['contact.phone_type']
+                    ? [
+                        {
+                          key: 'phone_type',
+                          field_value: group['contact.phone_type'],
+                        },
+                      ]
+                    : []),
+                ],
+              },
               tags,
-              customFields: [
-                ...customFields,
-                ...(group['contact.phone_type']
-                  ? [
-                      {
-                        key: 'phone_type',
-                        field_value: group['contact.phone_type'],
-                      },
-                    ]
-                  : []),
-              ],
             });
           }
           rowCount++;
@@ -567,7 +569,7 @@ export class UploadProcessor extends WorkerHost {
   }
 
   private async createGHLContact(
-    data: Record<string, string>,
+    data: { data: Record<string, string>; tags: string[] },
     id: string,
     counter: { success: number; failure: number },
   ) {
@@ -581,7 +583,7 @@ export class UploadProcessor extends WorkerHost {
       });
       const result = await axios.post(
         contact_creation_url,
-        { ...data, locationId: id },
+        { ...data.data, locationId: id },
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -589,6 +591,23 @@ export class UploadProcessor extends WorkerHost {
           },
         },
       );
+
+      const { contact } = result.data as { contact: { id: string } };
+      const tag_cration_url =
+        this.ConfigService.get('GHL_BASE_URL') + `/contacts/${contact.id}/tags`;
+
+      if (data.tags && data.tags.length > 0) {
+        await axios.post(
+          tag_cration_url,
+          { tags: data.tags },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Version: '2021-07-28',
+            },
+          },
+        );
+      }
       counter.success++;
       return result.data;
     } catch (error) {
