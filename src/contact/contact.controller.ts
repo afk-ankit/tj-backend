@@ -61,4 +61,8 @@ export class ContactController {
   workflowDelete(@Body() body: GHLWorkflowData) {
     return this.ContactService.workflow(body, 'DELETE');
   }
+  @Post('/verify/keep')
+  workflowKeep(@Body() body: GHLWorkflowData) {
+    return this.ContactService.workflow(body, 'KEEP');
+  }
 }
