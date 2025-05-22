@@ -254,15 +254,33 @@ export class ContactService {
     return res;
   }
 
-  async workflow(body: GHLWorkflowData, action: 'DND' | 'DELETE') {
+  async workflow(body: GHLWorkflowData, action: 'DND' | 'DELETE' | 'KEEP') {
     await this.authService.refreshToken(body.location.id, 'Location');
     const { accessToken } = await this.PrismaService.location.findUnique({
       where: {
         id: body.location.id,
       },
     });
-    const url = `${this.ConfigService.get('GHL_BASE_URL')}/contacts/search`;
     try {
+      if (action == 'KEEP') {
+        const contact_update_url =
+          this.ConfigService.get('GHL_BASE_URL') +
+          `/contacts/${body.contact_id}`;
+        const result = await axios.put(
+          contact_update_url,
+          {
+            tags: [...body.tags, 'verified-number'],
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Version: '2021-07-28',
+            },
+          },
+        );
+        return result.data;
+      }
+      const url = `${this.ConfigService.get('GHL_BASE_URL')}/contacts/search`;
       const res = await axios.post(
         url,
         {
@@ -284,14 +302,16 @@ export class ContactService {
           },
         },
       );
-      const { contacts } = res.data as { contacts: [{ id: string }] };
+      const { contacts } = res.data as {
+        contacts: [{ id: string; tags: string[] }];
+      };
       const counter = { success: 0, failure: 0 };
       const promiseMap = contacts.map((item) =>
         this.limit(() =>
           action == 'DND'
             ? this.updateGHLContactDND({
                 accessToken,
-                contactId: item.id,
+                data: { contactId: item.id, tags: item.tags },
                 counter,
                 exception: body.contact_id,
               })
@@ -315,24 +335,40 @@ export class ContactService {
   }
 
   private async updateGHLContactDND({
-    contactId,
+    data,
     counter,
     accessToken,
     exception,
   }: {
-    contactId: string;
+    data: { contactId: string; tags: string[] };
     counter: { success: number; failure: number };
     accessToken: string;
     exception: string;
   }) {
-    if (exception == contactId) return;
     try {
       const contact_update_url =
-        this.ConfigService.get('GHL_BASE_URL') + `/contacts/${contactId}`;
+        this.ConfigService.get('GHL_BASE_URL') + `/contacts/${data.contactId}`;
+      if (exception == data.contactId) {
+        const result = await axios.put(
+          contact_update_url,
+          {
+            tags: [...data.tags, 'verified-number'],
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Version: '2021-07-28',
+            },
+          },
+        );
+        counter.success++;
+        return result.data;
+      }
       const result = await axios.put(
         contact_update_url,
         {
           dnd: true,
+          tags: [...data.tags, 'non-verified-number'],
         },
         {
           headers: {
